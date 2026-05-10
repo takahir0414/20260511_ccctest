@@ -3,39 +3,34 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>アラームアプリ</title>
+  <title>ストップウォッチ</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div class="container">
-    <header>
-      <h1>⏰ アラーム</h1>
-      <div id="current-time" class="current-time"></div>
-    </header>
+    <h1>ストップウォッチ</h1>
 
-    <section class="add-alarm">
-      <h2>アラームを追加</h2>
-      <div class="input-row">
-        <input type="time" id="alarm-time" />
-        <input type="text" id="alarm-label" placeholder="ラベル（任意）" maxlength="30" />
-        <button id="add-btn">追加</button>
+    <div class="display">
+      <span id="minutes">00</span>
+      <span class="sep">:</span>
+      <span id="seconds">00</span>
+      <span class="sep small">.</span>
+      <span id="centiseconds" class="small">00</span>
+    </div>
+
+    <div class="controls">
+      <button id="start-stop" class="btn primary">スタート</button>
+      <button id="lap" class="btn secondary" disabled>ラップ</button>
+      <button id="reset" class="btn ghost" disabled>リセット</button>
+    </div>
+
+    <div class="laps-section" id="laps-section">
+      <div class="laps-header">
+        <span>ラップ</span>
+        <span>ラップタイム</span>
+        <span>合計</span>
       </div>
-    </section>
-
-    <section class="alarm-list">
-      <h2>アラーム一覧</h2>
-      <ul id="alarms"></ul>
-      <p id="empty-msg" class="empty-msg">アラームはまだありません</p>
-    </section>
-  </div>
-
-  <!-- Alarm modal -->
-  <div id="modal" class="modal hidden">
-    <div class="modal-box">
-      <div class="modal-icon">⏰</div>
-      <h2 id="modal-label">アラーム！</h2>
-      <p id="modal-time" class="modal-time"></p>
-      <button id="dismiss-btn">止める</button>
+      <ul id="lap-list"></ul>
     </div>
   </div>
 
