@@ -1,185 +1,61 @@
 (() => {
-  const STORAGE_KEY = 'alarms_v1';
+  const TOTAL_POKEMON = 1025;
 
-  // --- State ---
-  let alarms = load();
-  let audioCtx = null;
-  let firingId = null;
+  const card        = document.getElementById('card');
+  const prompt      = document.getElementById('prompt');
+  const loading     = document.getElementById('loading');
+  const pokemonView = document.getElementById('pokemon-view');
+  const img         = document.getElementById('pokemon-img');
+  const number      = document.getElementById('pokemon-number');
+  const name        = document.getElementById('pokemon-name');
+  const types       = document.getElementById('pokemon-types');
 
-  // --- DOM refs ---
-  const timeInput    = document.getElementById('alarm-time');
-  const labelInput   = document.getElementById('alarm-label');
-  const addBtn       = document.getElementById('add-btn');
-  const alarmsList   = document.getElementById('alarms');
-  const emptyMsg     = document.getElementById('empty-msg');
-  const modal        = document.getElementById('modal');
-  const modalLabel   = document.getElementById('modal-label');
-  const modalTime    = document.getElementById('modal-time');
-  const dismissBtn   = document.getElementById('dismiss-btn');
-  const currentTime  = document.getElementById('current-time');
+  let isFetching = false;
 
-  // --- Clock ---
-  function updateClock() {
-    const now = new Date();
-    currentTime.textContent = now.toLocaleTimeString('ja-JP', {
-      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-    });
-    checkAlarms(now);
-  }
+  async function fetchRandomPokemon() {
+    if (isFetching) return;
+    isFetching = true;
 
-  setInterval(updateClock, 500);
-  updateClock();
+    prompt.classList.add('hidden');
+    pokemonView.classList.add('hidden');
+    loading.classList.remove('hidden');
 
-  // --- Alarm check ---
-  function checkAlarms(now) {
-    const hh = String(now.getHours()).padStart(2, '0');
-    const mm = String(now.getMinutes()).padStart(2, '0');
-    const currentHHMM = `${hh}:${mm}`;
+    const id = Math.floor(Math.random() * TOTAL_POKEMON) + 1;
 
-    if (now.getSeconds() !== 0) return;
-
-    alarms.forEach(alarm => {
-      if (alarm.enabled && alarm.time === currentHHMM && firingId !== alarm.id) {
-        triggerAlarm(alarm);
-      }
-    });
-  }
-
-  // --- Trigger ---
-  function triggerAlarm(alarm) {
-    firingId = alarm.id;
-    modalLabel.textContent = alarm.label || 'アラーム';
-    modalTime.textContent  = alarm.time;
-    modal.classList.remove('hidden');
-    playBeep();
-    document.querySelector(`[data-id="${alarm.id}"]`)?.classList.add('firing');
-  }
-
-  // --- Dismiss ---
-  dismissBtn.addEventListener('click', () => {
-    modal.classList.add('hidden');
-    stopBeep();
-    if (firingId !== null) {
-      document.querySelector(`[data-id="${firingId}"]`)?.classList.remove('firing');
-    }
-    firingId = null;
-  });
-
-  // --- Add alarm ---
-  addBtn.addEventListener('click', addAlarm);
-  labelInput.addEventListener('keydown', e => { if (e.key === 'Enter') addAlarm(); });
-
-  function addAlarm() {
-    const time = timeInput.value;
-    if (!time) { timeInput.focus(); return; }
-
-    const alarm = {
-      id: Date.now(),
-      time,
-      label: labelInput.value.trim(),
-      enabled: true,
-    };
-
-    alarms.push(alarm);
-    alarms.sort((a, b) => a.time.localeCompare(b.time));
-    save();
-    render();
-
-    labelInput.value = '';
-    timeInput.value  = '';
-    timeInput.focus();
-  }
-
-  // --- Render ---
-  function render() {
-    alarmsList.innerHTML = '';
-    emptyMsg.style.display = alarms.length ? 'none' : '';
-
-    alarms.forEach(alarm => {
-      const li = document.createElement('li');
-      li.className = 'alarm-item' + (alarm.enabled ? ' active' : '');
-      li.dataset.id = alarm.id;
-
-      li.innerHTML = `
-        <div class="alarm-time">${alarm.time}</div>
-        <div class="alarm-info">
-          <div class="alarm-label">${escHtml(alarm.label)}</div>
-        </div>
-        <div class="alarm-controls">
-          <label class="toggle" title="${alarm.enabled ? 'オフにする' : 'オンにする'}">
-            <input type="checkbox" ${alarm.enabled ? 'checked' : ''} data-id="${alarm.id}" />
-            <span class="toggle-slider"></span>
-          </label>
-          <button class="delete-btn" data-id="${alarm.id}" title="削除">✕</button>
-        </div>
-      `;
-
-      li.querySelector('input[type="checkbox"]').addEventListener('change', e => {
-        const id = Number(e.target.dataset.id);
-        const a  = alarms.find(x => x.id === id);
-        if (a) { a.enabled = e.target.checked; save(); render(); }
-      });
-
-      li.querySelector('.delete-btn').addEventListener('click', e => {
-        const id = Number(e.currentTarget.dataset.id);
-        alarms = alarms.filter(x => x.id !== id);
-        save();
-        render();
-      });
-
-      alarmsList.appendChild(li);
-    });
-  }
-
-  // --- Persistence ---
-  function save() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(alarms)); } catch {}
-  }
-
-  function load() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch { return []; }
+      const res = await fetch(`https://pokeapi.co/api/v2/pokemon/${id}`);
+      if (!res.ok) throw new Error('fetch failed');
+      const data = await res.json();
+
+      const sprite =
+        data.sprites.other?.['official-artwork']?.front_default ||
+        data.sprites.front_default;
+
+      img.src = sprite || '';
+      img.alt = data.name;
+      number.textContent = `No. ${String(data.id).padStart(4, '0')}`;
+      name.textContent = data.name.replace(/-/g, ' ');
+
+      types.innerHTML = data.types
+        .map(t => `<span class="type-badge type-${t.type.name}">${t.type.name}</span>`)
+        .join('');
+
+      loading.classList.add('hidden');
+      pokemonView.classList.remove('hidden');
+    } catch {
+      loading.classList.add('hidden');
+      prompt.classList.remove('hidden');
+      prompt.textContent = '読み込みに失敗しました。もう一度クリック';
+    } finally {
+      isFetching = false;
+    }
   }
 
-  // --- Audio ---
-  function getAudioCtx() {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    return audioCtx;
-  }
-
-  let beepInterval = null;
-
-  function playBeep() {
-    const beep = () => {
-      const ctx  = getAudioCtx();
-      const osc  = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, ctx.currentTime);
-      osc.frequency.setValueAtTime(1100, ctx.currentTime + 0.1);
-      gain.gain.setValueAtTime(0.4, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.4);
-    };
-    beep();
-    beepInterval = setInterval(beep, 700);
-  }
-
-  function stopBeep() {
-    clearInterval(beepInterval);
-    beepInterval = null;
-  }
-
-  // --- Util ---
-  function escHtml(str) {
-    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
-
-  // --- Init ---
-  render();
+  card.addEventListener('click', fetchRandomPokemon);
+  card.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      fetchRandomPokemon();
+    }
+  });
 })();
