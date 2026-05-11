@@ -1,185 +1,367 @@
-(() => {
-  const STORAGE_KEY = 'alarms_v1';
+'use strict';
 
-  // --- State ---
-  let alarms = load();
-  let audioCtx = null;
-  let firingId = null;
+const API_KEY = '0a8e5af76b6ec57d96fe693e76ea90a4';
+const LIBRARY_API = 'https://api.calil.jp/library';
+const CHECK_API   = 'https://api.calil.jp/check';
 
-  // --- DOM refs ---
-  const timeInput    = document.getElementById('alarm-time');
-  const labelInput   = document.getElementById('alarm-label');
-  const addBtn       = document.getElementById('add-btn');
-  const alarmsList   = document.getElementById('alarms');
-  const emptyMsg     = document.getElementById('empty-msg');
-  const modal        = document.getElementById('modal');
-  const modalLabel   = document.getElementById('modal-label');
-  const modalTime    = document.getElementById('modal-time');
-  const dismissBtn   = document.getElementById('dismiss-btn');
-  const currentTime  = document.getElementById('current-time');
+const PREFECTURES = [
+  '北海道','青森県','岩手県','宮城県','秋田県','山形県','福島県',
+  '茨城県','栃木県','群馬県','埼玉県','千葉県','東京都','神奈川県',
+  '新潟県','富山県','石川県','福井県','山梨県','長野県','岐阜県',
+  '静岡県','愛知県','三重県','滋賀県','京都府','大阪府','兵庫県',
+  '奈良県','和歌山県','鳥取県','島根県','岡山県','広島県','山口県',
+  '徳島県','香川県','愛媛県','高知県','福岡県','佐賀県','長崎県',
+  '熊本県','大分県','宮崎県','鹿児島県','沖縄県',
+];
 
-  // --- Clock ---
-  function updateClock() {
-    const now = new Date();
-    currentTime.textContent = now.toLocaleTimeString('ja-JP', {
-      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-    });
-    checkAlarms(now);
+// State
+let libraries = [];
+let userLat = null;
+let userLon = null;
+let checkPollTimer = null;
+
+// DOM refs
+const geoBtn       = document.getElementById('geo-btn');
+const prefSelect   = document.getElementById('pref-select');
+const cityInput    = document.getElementById('city-input');
+const searchBtn    = document.getElementById('search-btn');
+const statusMsg    = document.getElementById('status-msg');
+const libResults   = document.getElementById('library-results');
+const libList      = document.getElementById('libraries-list');
+const resultCount  = document.getElementById('results-count');
+const bookSection  = document.getElementById('book-section');
+const isbnInput    = document.getElementById('isbn-input');
+const bookSearchBtn= document.getElementById('book-search-btn');
+const bookStatus   = document.getElementById('book-status');
+const bookResults  = document.getElementById('book-results');
+
+// Populate prefecture dropdown
+PREFECTURES.forEach(pref => {
+  const opt = document.createElement('option');
+  opt.value = pref;
+  opt.textContent = pref;
+  prefSelect.appendChild(opt);
+});
+
+// ── JSONP ────────────────────────────────────────────────────────────────
+function jsonp(url) {
+  return new Promise((resolve, reject) => {
+    const id = '_calil_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    const script = document.createElement('script');
+    let settled = false;
+
+    const cleanup = () => {
+      settled = true;
+      delete window[id];
+      script.remove();
+    };
+
+    window[id] = (data) => {
+      if (settled) return;
+      cleanup();
+      resolve(data);
+    };
+
+    script.onerror = () => {
+      if (settled) return;
+      cleanup();
+      reject(new Error('ネットワークエラーが発生しました'));
+    };
+
+    script.src = url + (url.includes('?') ? '&' : '?') + 'callback=' + id;
+    document.head.appendChild(script);
+  });
+}
+
+// ── Haversine distance (km) ───────────────────────────────────────────────
+function calcDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const toRad = x => x * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatDistance(km) {
+  return km < 1 ? Math.round(km * 1000) + 'm' : km.toFixed(1) + 'km';
+}
+
+// ── Status helpers ────────────────────────────────────────────────────────
+function showStatus(type, text) {
+  statusMsg.className = 'status-msg ' + type;
+  statusMsg.innerHTML = type === 'loading'
+    ? `<span class="spinner"></span>${esc(text)}`
+    : esc(text);
+  statusMsg.classList.remove('hidden');
+}
+function hideStatus() { statusMsg.classList.add('hidden'); }
+
+function showBookStatus(type, text) {
+  bookStatus.className = 'status-msg ' + type;
+  bookStatus.innerHTML = type === 'loading'
+    ? `<span class="spinner"></span>${esc(text)}`
+    : esc(text);
+  bookStatus.classList.remove('hidden');
+}
+function hideBookStatus() { bookStatus.classList.add('hidden'); }
+
+// ── Geolocation search ────────────────────────────────────────────────────
+geoBtn.addEventListener('click', () => {
+  if (!navigator.geolocation) {
+    showStatus('error', '⚠️ このブラウザは位置情報に対応していません');
+    return;
+  }
+  geoBtn.disabled = true;
+  showStatus('loading', '現在地を取得中...');
+
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      userLat = pos.coords.latitude;
+      userLon = pos.coords.longitude;
+      geoBtn.disabled = false;
+      showStatus('loading', '図書館を検索中...');
+      try {
+        const url = `${LIBRARY_API}?appkey=${API_KEY}&geocode=${userLon},${userLat}&limit=30`;
+        const data = await jsonp(url);
+        handleLibResults(data);
+      } catch (e) {
+        showStatus('error', '⚠️ 検索に失敗しました: ' + e.message);
+      }
+    },
+    (err) => {
+      geoBtn.disabled = false;
+      const msgs = {
+        1: '位置情報の使用が拒否されました。ブラウザの設定を確認してください。',
+        2: '位置情報を取得できませんでした。',
+        3: '位置情報の取得がタイムアウトしました。',
+      };
+      showStatus('error', '⚠️ ' + (msgs[err.code] || err.message));
+    },
+    { timeout: 10000 }
+  );
+});
+
+// ── Manual search ─────────────────────────────────────────────────────────
+searchBtn.addEventListener('click', doManualSearch);
+cityInput.addEventListener('keydown', e => { if (e.key === 'Enter') doManualSearch(); });
+
+async function doManualSearch() {
+  const pref = prefSelect.value;
+  const city = cityInput.value.trim();
+  if (!pref) {
+    prefSelect.focus();
+    showStatus('error', '⚠️ 都道府県を選択してください');
+    return;
+  }
+  userLat = null;
+  userLon = null;
+  searchBtn.disabled = true;
+  showStatus('loading', '図書館を検索中...');
+  try {
+    let url = `${LIBRARY_API}?appkey=${API_KEY}&pref=${encodeURIComponent(pref)}&limit=30`;
+    if (city) url += `&city=${encodeURIComponent(city)}`;
+    const data = await jsonp(url);
+    handleLibResults(data);
+  } catch (e) {
+    showStatus('error', '⚠️ 検索に失敗しました: ' + e.message);
+  } finally {
+    searchBtn.disabled = false;
+  }
+}
+
+// ── Handle library results ────────────────────────────────────────────────
+function handleLibResults(data) {
+  if (!Array.isArray(data) || data.length === 0) {
+    showStatus('error', '⚠️ 図書館が見つかりませんでした。検索条件を変えてお試しください。');
+    return;
   }
 
-  setInterval(updateClock, 500);
-  updateClock();
-
-  // --- Alarm check ---
-  function checkAlarms(now) {
-    const hh = String(now.getHours()).padStart(2, '0');
-    const mm = String(now.getMinutes()).padStart(2, '0');
-    const currentHHMM = `${hh}:${mm}`;
-
-    if (now.getSeconds() !== 0) return;
-
-    alarms.forEach(alarm => {
-      if (alarm.enabled && alarm.time === currentHHMM && firingId !== alarm.id) {
-        triggerAlarm(alarm);
+  // Calculate and sort by distance when geolocation is available
+  if (userLat !== null) {
+    data.forEach(lib => {
+      if (lib.geocode) {
+        const [lon, lat] = lib.geocode.split(',').map(Number);
+        lib._dist = isNaN(lat) ? Infinity : calcDistance(userLat, userLon, lat, lon);
+      } else {
+        lib._dist = Infinity;
       }
     });
+    data.sort((a, b) => a._dist - b._dist);
   }
 
-  // --- Trigger ---
-  function triggerAlarm(alarm) {
-    firingId = alarm.id;
-    modalLabel.textContent = alarm.label || 'アラーム';
-    modalTime.textContent  = alarm.time;
-    modal.classList.remove('hidden');
-    playBeep();
-    document.querySelector(`[data-id="${alarm.id}"]`)?.classList.add('firing');
-  }
+  libraries = data;
+  hideStatus();
+  renderLibraries();
+}
 
-  // --- Dismiss ---
-  dismissBtn.addEventListener('click', () => {
-    modal.classList.add('hidden');
-    stopBeep();
-    if (firingId !== null) {
-      document.querySelector(`[data-id="${firingId}"]`)?.classList.remove('firing');
-    }
-    firingId = null;
+// ── Render libraries ──────────────────────────────────────────────────────
+function renderLibraries() {
+  resultCount.textContent = libraries.length + '件';
+  libResults.classList.remove('hidden');
+  libList.innerHTML = '';
+
+  libraries.forEach(lib => {
+    const name    = lib.formal || lib.name || lib.libkey || '不明';
+    const address = lib.address || '';
+    const tel     = lib.tel || '';
+    const url     = lib.url || '';
+    const sysId   = lib.systemid || '';
+
+    const distHtml = (lib._dist !== undefined && lib._dist !== Infinity)
+      ? `<span class="lib-distance">${formatDistance(lib._dist)}</span>`
+      : '';
+
+    const telHtml = tel
+      ? `<div class="lib-tel">📞 ${esc(tel)}</div>`
+      : '';
+
+    const urlHtml = url
+      ? `<a class="lib-url" href="${esc(url)}" target="_blank" rel="noopener">ウェブサイト →</a>`
+      : '<span></span>';
+
+    const li = document.createElement('li');
+    li.className = 'library-card';
+    li.innerHTML = `
+      <div class="lib-header">
+        <h3 class="lib-name">${esc(name)}</h3>
+        ${distHtml}
+      </div>
+      ${address ? `<div class="lib-address">📍 ${esc(address)}</div>` : ''}
+      ${telHtml}
+      <div class="lib-footer">
+        ${urlHtml}
+        <span class="lib-system">${esc(sysId)}</span>
+      </div>
+    `;
+    libList.appendChild(li);
   });
 
-  // --- Add alarm ---
-  addBtn.addEventListener('click', addAlarm);
-  labelInput.addEventListener('keydown', e => { if (e.key === 'Enter') addAlarm(); });
+  bookSection.classList.remove('hidden');
+  bookSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
 
-  function addAlarm() {
-    const time = timeInput.value;
-    if (!time) { timeInput.focus(); return; }
+// ── Book search ───────────────────────────────────────────────────────────
+bookSearchBtn.addEventListener('click', startBookSearch);
+isbnInput.addEventListener('keydown', e => { if (e.key === 'Enter') startBookSearch(); });
 
-    const alarm = {
-      id: Date.now(),
-      time,
-      label: labelInput.value.trim(),
-      enabled: true,
-    };
+function startBookSearch() {
+  const raw = isbnInput.value.trim().replace(/-/g, '');
+  if (!raw) { isbnInput.focus(); return; }
 
-    alarms.push(alarm);
-    alarms.sort((a, b) => a.time.localeCompare(b.time));
-    save();
-    render();
-
-    labelInput.value = '';
-    timeInput.value  = '';
-    timeInput.focus();
+  if (!/^\d{10}(\d{3})?$/.test(raw)) {
+    showBookStatus('error', '⚠️ ISBNは10桁または13桁の数字で入力してください（ハイフン不要）');
+    return;
   }
 
-  // --- Render ---
-  function render() {
-    alarmsList.innerHTML = '';
-    emptyMsg.style.display = alarms.length ? 'none' : '';
+  if (libraries.length === 0) {
+    showBookStatus('error', '⚠️ まず図書館を検索してください');
+    return;
+  }
 
-    alarms.forEach(alarm => {
-      const li = document.createElement('li');
-      li.className = 'alarm-item' + (alarm.enabled ? ' active' : '');
-      li.dataset.id = alarm.id;
+  // Stop any existing poll
+  if (checkPollTimer !== null) {
+    clearTimeout(checkPollTimer);
+    checkPollTimer = null;
+  }
 
-      li.innerHTML = `
-        <div class="alarm-time">${alarm.time}</div>
-        <div class="alarm-info">
-          <div class="alarm-label">${escHtml(alarm.label)}</div>
-        </div>
-        <div class="alarm-controls">
-          <label class="toggle" title="${alarm.enabled ? 'オフにする' : 'オンにする'}">
-            <input type="checkbox" ${alarm.enabled ? 'checked' : ''} data-id="${alarm.id}" />
-            <span class="toggle-slider"></span>
-          </label>
-          <button class="delete-btn" data-id="${alarm.id}" title="削除">✕</button>
-        </div>
-      `;
+  const systemIds = [...new Set(libraries.map(l => l.systemid).filter(Boolean))].slice(0, 100);
 
-      li.querySelector('input[type="checkbox"]').addEventListener('change', e => {
-        const id = Number(e.target.dataset.id);
-        const a  = alarms.find(x => x.id === id);
-        if (a) { a.enabled = e.target.checked; save(); render(); }
-      });
+  bookResults.innerHTML = '';
+  bookResults.classList.add('hidden');
+  bookSearchBtn.disabled = true;
+  showBookStatus('loading', `ISBN ${raw} を検索中...`);
 
-      li.querySelector('.delete-btn').addEventListener('click', e => {
-        const id = Number(e.currentTarget.dataset.id);
-        alarms = alarms.filter(x => x.id !== id);
-        save();
-        render();
-      });
+  pollCheck(raw, systemIds, null);
+}
 
-      alarmsList.appendChild(li);
+// ── Polling check ─────────────────────────────────────────────────────────
+async function pollCheck(isbn, systemIds, session) {
+  let url = `${CHECK_API}?appkey=${API_KEY}&isbn=${isbn}&systemid=${systemIds.join(',')}&format=json`;
+  if (session) url += `&session=${encodeURIComponent(session)}`;
+
+  try {
+    const data = await jsonp(url);
+    renderBookResults(isbn, data.books || {});
+
+    if (data.continue === 1) {
+      showBookStatus('loading', '図書館の在庫を確認中...');
+      checkPollTimer = setTimeout(() => pollCheck(isbn, systemIds, data.session), 2000);
+    } else {
+      hideBookStatus();
+      bookSearchBtn.disabled = false;
+    }
+  } catch (e) {
+    showBookStatus('error', '⚠️ 蔵書検索に失敗しました: ' + e.message);
+    bookSearchBtn.disabled = false;
+  }
+}
+
+// ── Render book results ───────────────────────────────────────────────────
+const STATUS_META = {
+  '貸出可':  { cls: 'available',   label: '貸出可' },
+  '館内のみ':{ cls: 'inhouse',     label: '館内のみ' },
+  '貸出中':  { cls: 'checked-out', label: '貸出中' },
+  '在庫なし':{ cls: 'none',        label: '在庫なし' },
+  '予約中':  { cls: 'reserved',    label: '予約中' },
+  '準備中':  { cls: 'reserved',    label: '準備中' },
+};
+
+function renderBookResults(isbn, books) {
+  const isbnData = books[isbn] || {};
+  bookResults.innerHTML = '';
+
+  const items = [];
+
+  Object.entries(isbnData).forEach(([sysId, info]) => {
+    if (!info || info.status === 'Error') return;
+    const libkeys = info.libkey || {};
+    Object.entries(libkeys).forEach(([libName, statusStr]) => {
+      items.push({ sysId, libName, statusStr, reserveurl: info.reserveurl || '' });
     });
+  });
+
+  // Sort: available first
+  const order = ['貸出可', '館内のみ', '準備中', '予約中', '貸出中', '在庫なし'];
+  items.sort((a, b) => {
+    const ia = order.indexOf(a.statusStr);
+    const ib = order.indexOf(b.statusStr);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
+
+  if (items.length === 0) {
+    bookResults.innerHTML = '<p class="no-results">検索した図書館には蔵書情報がありませんでした</p>';
+    bookResults.classList.remove('hidden');
+    return;
   }
 
-  // --- Persistence ---
-  function save() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(alarms)); } catch {}
-  }
+  items.forEach(({ libName, statusStr, reserveurl }) => {
+    const meta = STATUS_META[statusStr] || { cls: 'unknown', label: statusStr || '不明' };
+    const reserveHtml = reserveurl
+      ? `<a class="reserve-link" href="${esc(reserveurl)}" target="_blank" rel="noopener">予約する</a>`
+      : '';
 
-  function load() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch { return []; }
-  }
+    const div = document.createElement('div');
+    div.className = 'book-result-item';
+    div.innerHTML = `
+      <span class="book-lib-name">${esc(libName)}</span>
+      <span class="book-status ${meta.cls}">${esc(meta.label)}</span>
+      ${reserveHtml}
+    `;
+    bookResults.appendChild(div);
+  });
 
-  // --- Audio ---
-  function getAudioCtx() {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    return audioCtx;
-  }
+  bookResults.classList.remove('hidden');
+}
 
-  let beepInterval = null;
-
-  function playBeep() {
-    const beep = () => {
-      const ctx  = getAudioCtx();
-      const osc  = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, ctx.currentTime);
-      osc.frequency.setValueAtTime(1100, ctx.currentTime + 0.1);
-      gain.gain.setValueAtTime(0.4, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.4);
-    };
-    beep();
-    beepInterval = setInterval(beep, 700);
-  }
-
-  function stopBeep() {
-    clearInterval(beepInterval);
-    beepInterval = null;
-  }
-
-  // --- Util ---
-  function escHtml(str) {
-    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
-
-  // --- Init ---
-  render();
-})();
+// ── HTML escape ───────────────────────────────────────────────────────────
+function esc(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}

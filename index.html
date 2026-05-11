@@ -3,41 +3,76 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>アラームアプリ</title>
+  <title>図書館サーチ</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="container">
-    <header>
-      <h1>⏰ アラーム</h1>
-      <div id="current-time" class="current-time"></div>
-    </header>
+  <header class="app-header">
+    <div class="container">
+      <h1>📚 図書館サーチ</h1>
+      <p class="subtitle">近くの図書館と蔵書を検索</p>
+    </div>
+  </header>
 
-    <section class="add-alarm">
-      <h2>アラームを追加</h2>
-      <div class="input-row">
-        <input type="time" id="alarm-time" />
-        <input type="text" id="alarm-label" placeholder="ラベル（任意）" maxlength="30" />
-        <button id="add-btn">追加</button>
+  <main class="container">
+
+    <section class="card" id="search-section">
+      <h2 class="section-title">図書館を探す</h2>
+
+      <button id="geo-btn" class="btn btn-primary btn-lg">
+        <span class="btn-icon">📍</span>現在地から検索
+      </button>
+
+      <div class="divider"><span>または</span></div>
+
+      <div class="manual-search">
+        <div class="form-row">
+          <select id="pref-select">
+            <option value="">都道府県を選択...</option>
+          </select>
+          <input type="text" id="city-input" placeholder="市区町村（任意）" />
+        </div>
+        <button id="search-btn" class="btn btn-primary">検索する</button>
       </div>
     </section>
 
-    <section class="alarm-list">
-      <h2>アラーム一覧</h2>
-      <ul id="alarms"></ul>
-      <p id="empty-msg" class="empty-msg">アラームはまだありません</p>
-    </section>
-  </div>
+    <div id="status-msg" class="status-msg hidden"></div>
 
-  <!-- Alarm modal -->
-  <div id="modal" class="modal hidden">
-    <div class="modal-box">
-      <div class="modal-icon">⏰</div>
-      <h2 id="modal-label">アラーム！</h2>
-      <p id="modal-time" class="modal-time"></p>
-      <button id="dismiss-btn">止める</button>
+    <section id="library-results" class="hidden">
+      <div class="results-header">
+        <h2 class="section-title">図書館一覧</h2>
+        <span id="results-count" class="badge"></span>
+      </div>
+      <ul id="libraries-list" class="libraries-list"></ul>
+    </section>
+
+    <section class="card hidden" id="book-section">
+      <h2 class="section-title">蔵書検索</h2>
+      <p class="hint">見つかった図書館で本を検索します</p>
+
+      <div class="book-search-form">
+        <input
+          type="text"
+          id="isbn-input"
+          placeholder="ISBN（例：9784101092058）"
+          maxlength="20"
+          inputmode="numeric"
+        />
+        <button id="book-search-btn" class="btn btn-secondary">検索</button>
+      </div>
+      <p class="hint small">本の裏表紙バーコード下の978から始まる13桁の数字です</p>
+
+      <div id="book-status" class="status-msg hidden"></div>
+      <div id="book-results" class="book-results hidden"></div>
+    </section>
+
+  </main>
+
+  <footer class="app-footer">
+    <div class="container">
+      Powered by <a href="https://calil.jp/" target="_blank" rel="noopener">カーリル図書館API</a>
     </div>
-  </div>
+  </footer>
 
   <script src="app.js"></script>
 </body>
