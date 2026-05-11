@@ -3,24 +3,77 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ランダムポケモン</title>
+  <title>図書館サーチ</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="container">
-    <h1>ランダムポケモン</h1>
-    <div id="card" class="card" role="button" tabindex="0" aria-label="クリックして新しいポケモンを表示">
-      <div id="loading" class="loading hidden">読み込み中...</div>
-      <div id="pokemon-view" class="pokemon-view hidden">
-        <img id="pokemon-img" src="" alt="" />
-        <p id="pokemon-number" class="number"></p>
-        <h2 id="pokemon-name" class="name"></h2>
-        <div id="pokemon-types" class="types"></div>
-      </div>
-      <div id="prompt" class="prompt">クリックしてポケモンを表示</div>
+  <header class="app-header">
+    <div class="container">
+      <h1>📚 図書館サーチ</h1>
+      <p class="subtitle">近くの図書館と蔵書を検索</p>
     </div>
-    <p class="hint">クリックするたびに新しいポケモンが出現します</p>
-  </div>
+  </header>
+
+  <main class="container">
+
+    <section class="card" id="search-section">
+      <h2 class="section-title">図書館を探す</h2>
+
+      <button id="geo-btn" class="btn btn-primary btn-lg">
+        <span class="btn-icon">📍</span>現在地から検索
+      </button>
+
+      <div class="divider"><span>または</span></div>
+
+      <div class="manual-search">
+        <div class="form-row">
+          <select id="pref-select">
+            <option value="">都道府県を選択...</option>
+          </select>
+          <input type="text" id="city-input" placeholder="市区町村（任意）" />
+        </div>
+        <button id="search-btn" class="btn btn-primary">検索する</button>
+      </div>
+    </section>
+
+    <div id="status-msg" class="status-msg hidden"></div>
+
+    <section id="library-results" class="hidden">
+      <div class="results-header">
+        <h2 class="section-title">図書館一覧</h2>
+        <span id="results-count" class="badge"></span>
+      </div>
+      <ul id="libraries-list" class="libraries-list"></ul>
+    </section>
+
+    <section class="card hidden" id="book-section">
+      <h2 class="section-title">蔵書検索</h2>
+      <p class="hint">見つかった図書館で本を検索します</p>
+
+      <div class="book-search-form">
+        <input
+          type="text"
+          id="isbn-input"
+          placeholder="ISBN（例：9784101092058）"
+          maxlength="20"
+          inputmode="numeric"
+        />
+        <button id="book-search-btn" class="btn btn-secondary">検索</button>
+      </div>
+      <p class="hint small">本の裏表紙バーコード下の978から始まる13桁の数字です</p>
+
+      <div id="book-status" class="status-msg hidden"></div>
+      <div id="book-results" class="book-results hidden"></div>
+    </section>
+
+  </main>
+
+  <footer class="app-footer">
+    <div class="container">
+      Powered by <a href="https://calil.jp/" target="_blank" rel="noopener">カーリル図書館API</a>
+    </div>
+  </footer>
+
   <script src="app.js"></script>
 </body>
 </html>
