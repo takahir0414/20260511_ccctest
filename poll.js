@@ -1,11 +1,14 @@
 require('dotenv').config();
 const { Client } = require('@notionhq/client');
+const Anthropic = require('@anthropic-ai/sdk');
 const axios = require('axios');
 const fs = require('fs');
 
 const notion = new Client({ auth: process.env.NOTION_API_KEY });
 const PROCESSED_FILE = '.processed_pages.json';
-const POLL_INTERVAL = 5 * 60 * 1000; // 5分毎
+
+// Claude または Gemini を選択（.envで AI_PROVIDER=claude または gemini を指定）
+const AI_PROVIDER = process.env.AI_PROVIDER || 'gemini';
 
 function loadProcessed() {
   try { return JSON.parse(fs.readFileSync(PROCESSED_FILE, 'utf8')); }
@@ -24,18 +27,30 @@ async function getPageText(pageId) {
     .join('\n');
 }
 
-async function summarize(text, title) {
+const PROMPT = (title, text) =>
+  `以下のミーティングのトランスクリプトを日本語で要約してください。\n\n【概要】（2〜3文）\n【決定事項】（箇条書き）\n【アクションアイテム】（誰が・何を）\n【次のステップ】\n\nタイトル: ${title}\nトランスクリプト:\n${text.slice(0, 30000)}`;
+
+async function summarizeWithClaude(text, title) {
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const res = await client.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 1024,
+    messages: [{ role: 'user', content: PROMPT(title, text) }],
+  });
+  return res.content[0].text;
+}
+
+async function summarizeWithGemini(text, title) {
   const res = await axios.post(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-    {
-      contents: [{
-        parts: [{
-          text: `以下のミーティングのトランスクリプトを日本語で要約してください。\n\n【概要】（2〜3文）\n【決定事項】（箇条書き）\n【アクションアイテム】（誰が・何を）\n【次のステップ】\n\nタイトル: ${title}\nトランスクリプト:\n${text.slice(0, 30000)}`
-        }]
-      }]
-    }
+    { contents: [{ parts: [{ text: PROMPT(title, text) }] }] }
   );
   return res.data.candidates[0].content.parts[0].text;
+}
+
+async function summarize(text, title) {
+  if (AI_PROVIDER === 'claude') return summarizeWithClaude(text, title);
+  return summarizeWithGemini(text, title);
 }
 
 async function sendLine(message) {
@@ -43,7 +58,7 @@ async function sendLine(message) {
     'https://api.line.me/v2/bot/message/push',
     {
       to: process.env.LINE_GROUP_ID,
-      messages: [{ type: 'text', text: message.slice(0, 5000) }]
+      messages: [{ type: 'text', text: message.slice(0, 5000) }],
     },
     {
       headers: {
@@ -54,8 +69,9 @@ async function sendLine(message) {
   );
 }
 
-async function poll() {
+async function run() {
   const processed = loadProcessed();
+  console.log(`[${now()}] 実行開始（AI: ${AI_PROVIDER}）`);
 
   try {
     const children = await notion.blocks.children.list({
@@ -67,13 +83,13 @@ async function poll() {
     );
 
     if (newPages.length === 0) {
-      console.log(`[${new Date().toLocaleTimeString('ja-JP')}] 新規ページなし`);
+      console.log('  → 新規ページなし');
       return;
     }
 
     for (const page of newPages) {
       const title = page.child_page.title;
-      console.log(`[新規] ${title}`);
+      console.log(`  → 新規: ${title}`);
 
       const content = await getPageText(page.id);
       if (!content.trim()) {
@@ -82,10 +98,10 @@ async function poll() {
         continue;
       }
 
-      console.log('  → Geminiで要約中...');
+      console.log('  → 要約中...');
       const summary = await summarize(content, title);
 
-      console.log('  → LINEに送信中...');
+      console.log('  → LINE送信中...');
       await sendLine(`📋 ミーティング要約\n\n【${title}】\n\n${summary}`);
 
       console.log('  → 完了！');
@@ -98,6 +114,28 @@ async function poll() {
   }
 }
 
-console.log('監視開始（5分毎にNotionをチェック）');
-poll();
-setInterval(poll, POLL_INTERVAL);
+// 毎日17:00に実行
+function scheduleDaily() {
+  const HOUR = 17;
+
+  setInterval(() => {
+    const d = new Date();
+    if (d.getHours() === HOUR && d.getMinutes() === 0) {
+      run();
+    }
+  }, 60 * 1000); // 1分毎に時刻チェック
+
+  console.log(`毎日 ${HOUR}:00 に自動実行します`);
+  console.log('今すぐテストしたい場合は: node poll.js --now');
+}
+
+function now() {
+  return new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+}
+
+// --now オプションで即時実行
+if (process.argv.includes('--now')) {
+  run();
+} else {
+  scheduleDaily();
+}
