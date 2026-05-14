@@ -1,0 +1,20 @@
+{
+  "name": "tldv-notion-line-automation",
+  "version": "1.0.0",
+  "description": "tl;dv録画完了 → Notion保存 → AI要約 → グループLINE送信 自動化",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@notionhq/client": "^2.2.15",
+    "axios": "^1.7.7",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
