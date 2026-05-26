@@ -1,0 +1,76 @@
+{
+  "name": "tldv → Notion 議事録自動追加",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "tldv-webhook",
+        "responseMode": "onReceived",
+        "responseData": "allEntries"
+      },
+      "id": "webhook-node",
+      "name": "tldv Webhook受信",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "tldv-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\nconst title = body.meeting_title || body.title || body.name || '（タイトルなし）';\nconst transcript = body.transcript || body.transcription || body.content || '';\nconst participants = Array.isArray(body.participants)\n  ? body.participants.map(p => p.name || p).join('、')\n  : (body.attendees || '不明');\nconst recordingUrl = body.recording_url || body.url || body.video_url || '';\nconst meetingDate = body.meeting_date || body.date || body.started_at || new Date().toISOString();\n\nreturn [{\n  json: {\n    title,\n    transcript,\n    participants,\n    recordingUrl,\n    meetingDate: new Date(meetingDate).toISOString().split('T')[0]\n  }\n}];"
+      },
+      "id": "code-node",
+      "name": "データ整形",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "resource": "page",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "value": "35fbaf726af480a7aaeec8d07884951b",
+          "mode": "id"
+        },
+        "title": "={{ $json.title }}",
+        "propertiesUi": {
+          "propertyValues": [
+            { "key": "ステータス", "type": "select", "selectValue": "未要約" },
+            { "key": "日付", "type": "date", "dateValue": "={{ $json.meetingDate }}" },
+            { "key": "参加者", "type": "richText", "textValue": "={{ $json.participants }}" },
+            { "key": "録画リンク", "type": "url", "urlValue": "={{ $json.recordingUrl }}" }
+          ]
+        },
+        "blockUi": {
+          "blockValues": [
+            { "type": "paragraph", "textContent": "={{ $json.transcript }}" }
+          ]
+        }
+      },
+      "id": "notion-node",
+      "name": "Notionにページ作成",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2,
+      "position": [720, 300],
+      "credentials": {
+        "notionApi": {
+          "id": "notion-credential",
+          "name": "Notion API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "tldv Webhook受信": {
+      "main": [[{ "node": "データ整形", "type": "main", "index": 0 }]]
+    },
+    "データ整形": {
+      "main": [[{ "node": "Notionにページ作成", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "saveManualExecutions": true
+  }
+}
